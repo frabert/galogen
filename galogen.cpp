@@ -69,19 +69,6 @@ struct EnumerantInfo {
   std::string api;
 };
 
-// Information about enumerant group.
-struct GroupInfo {
-   // Name of the group, i.e. "AccumOp".
-   std::string name;
-   
-   // List of enumerants that are members of this group.
-   std::vector<const EnumerantInfo*> enums;
-   
-   // Always empty.
-   std::string api;
-};
-
-
 // Information about an API command, i.e. glBindTexture
 struct CommandInfo {
   // Information about a command parameter.
@@ -154,7 +141,6 @@ public:
                      int api_ver_min){}
   
   virtual void processType(const TypeInfo &type){}
-  virtual void processEnumGroup(const GroupInfo &group){}
   virtual void processEnumerant(const EnumerantInfo &type){}
   virtual void processCommand(const CommandInfo &type){}
   
@@ -272,33 +258,6 @@ void populateEntity(EnumerantInfo *info, const tinyxml2::XMLElement *e) {
   }
   if (const char *api_attrib = e->Attribute("api")) {
     info->api = api_attrib;
-  }
-}
-
-void populateEntity(GroupInfo *info,
-                    const tinyxml2::XMLElement *e,
-                    const internal::EntityMap<EnumerantInfo> &map,
-                    const std::string &api_name) {
-  info->name = e->Attribute("name");
-  FAIL_IF(info->name.empty(),
-          "Group missing \"name\" attribute on line %d\n",
-          e->GetLineNum());
-  FOR_EACH_CHILD_ELEM_NAMED("enum", e, enum_ref) {
-    const char *ref_name = enum_ref->Attribute("name");
-    FAIL_IF(ref_name == nullptr,
-            "Enum reference missing name attribute on line %d\n",
-            enum_ref->GetLineNum());
-    auto enum_it = map.find(ref_name);
-    FAIL_IF(enum_it == map.end(),
-            "Reference to undefined enum %s on line %d\n",
-            ref_name,
-            enum_ref->GetLineNum());
-    const EnumerantInfo *enum_info =
-        enum_it->second.get(api_name.c_str());
-    FAIL_IF(enum_info == nullptr,
-            "Failed to find enum %s for api %s\n",
-            ref_name, api_name.c_str());
-    info->enums.push_back(enum_info);
   }
 }
 
@@ -503,7 +462,6 @@ void generate(GenerationOptions &options) {
   EntityMap<TypeInfo> type_map;
   EntityMap<EnumerantInfo> enum_map;
   EntityMap<CommandInfo> command_map;
-  EntityMap<GroupInfo> group_map;
   
   // Load information about API entities into the maps.
   loadEntities(root->FirstChildElement("types"), "type", type_map);
@@ -511,11 +469,6 @@ void generate(GenerationOptions &options) {
   FOR_EACH_CHILD_ELEM_NAMED("enums", root, enums_container) {
     loadEntities(enums_container, "enum", enum_map);
   }
-  loadEntities(root->FirstChildElement("groups"),
-               "group",
-               group_map,
-               enum_map,
-               options.api_name);
 
   // Each API version is described in a "feature" element.
   // The contents of the tag specify the difference against the previous version
@@ -623,22 +576,6 @@ void generate(GenerationOptions &options) {
             "Reference to undefined type %s\n",
             type_name.c_str());
     output_type(type_it->second);
-  }
-
-  const std::unordered_set<std::string> &groups = entity_sets["group"];
-  for (const auto &group_name : groups) {
-    auto group_it = group_map.find(group_name);
-    if(group_it == group_map.end()) {
-      // It is not an error to refer to a group that had not been defined
-      // before (see readme section 7.3).
-      continue;
-    }
-    const GroupInfo *info = group_it->second.get(options.api_name.c_str());
-    FAIL_IF(info == nullptr,
-            "Failed to find group %s for api %s\n",
-            group_name.c_str(),
-            options.api_name.c_str());
-    options.generator->processEnumGroup(*info);
   }
 
   const std::unordered_set<std::string> &enums = entity_sets["enum"];
